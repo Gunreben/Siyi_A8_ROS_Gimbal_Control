@@ -4,16 +4,30 @@ import socket
 import struct
 import time
 
-def calculate_crc16(data):
-    crc = 0
-    for byte in data:
-        crc = crc ^ (byte << 8)
+# Generate the CRC16 table using the polynomial G(X) = X^16 + X^12 + X^5 + 1 (0x1021)
+def generate_crc16_table():
+    crc16_tab = []
+    for i in range(256):
+        crc = i << 8
         for _ in range(8):
             if crc & 0x8000:
-                crc = (crc << 1) ^ 0x1021
+                crc = ((crc << 1) ^ 0x1021) & 0xFFFF
             else:
-                crc = crc << 1
-    return crc & 0xFFFF
+                crc = (crc << 1) & 0xFFFF
+        crc16_tab.append(crc)
+    return crc16_tab
+
+crc16_tab = generate_crc16_table()
+
+def CRC16_cal(data: bytes, crc_init=0x0000):
+    crc = crc_init
+    for b in data:
+        temp = (crc >> 8) & 0xFF
+        index = b ^ temp
+        oldcrc16 = crc16_tab[index]
+        crc = ((crc << 8) ^ oldcrc16) & 0xFFFF
+    return crc
+
 
 class GimbalControlInterface:
     def __init__(self, master):
@@ -82,10 +96,11 @@ class GimbalControlInterface:
             command = struct.pack('>BBHHHBB', 0x55, 0x66, 0x01, 0x02, 0x00, 0x07, yaw & 0xFF, pitch & 0xFF)
             
             # Calculate CRC
-            crc = calculate_crc16(command)
-            
-            # Append CRC to the command
-            command += struct.pack('>H', crc)
+            crc = CRC16_cal(command)
+
+            # Append the CRC16 checksum at the end of the data
+            # Choose the desired endianess for the CRC (here, big-endian is used)
+            command = command + struct.pack('>H', crc)  # Append CRC in big-endian format
             
             self.send_command(command)
             self.last_update_time = current_time
